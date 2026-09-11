@@ -1,0 +1,22 @@
+# Node & Frontend
+node_modules/
+frontend/.next/
+frontend/node_modules/
+frontend/.env.local
+frontend/tsconfig.tsbuildinfo
+
+# Python & Backend
+__pycache__/
+*.py[cod]
+*$py.class
+backend/venv/
+backend/.env
+backend/documind.db
+backend/qdrant_data/
+backend/uploads/
+
+# OS / Editor
+.DS_Store
+.idea/
+.vscode/
+*.log
