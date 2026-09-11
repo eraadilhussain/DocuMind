@@ -58,8 +58,8 @@ DocuMind is an advanced full-stack AI chat application that allows users to uplo
 
 ### 1. Clone the repository
 ```bash
-git clone https://github.com/yourusername/advchat.git
-cd advchat
+git clone https://github.com/eraadilhussain/DocuMind.git
+cd DocuMind
 ```
 
 ### 2. Set up the Backend
