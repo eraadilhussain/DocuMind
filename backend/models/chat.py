@@ -10,4 +10,5 @@ class Chat(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     user = relationship("User", backref="chats")
-    messages = relationship("Message", back_populates="chat", cascade="all, delete-orphan")`ndocuments = relationship("Document", back_populates="chat", cascade="all, delete-orphan")
+    messages = relationship("Message", back_populates="chat", cascade="all, delete-orphan")
+    documents = relationship("Document", back_populates="chat", cascade="all, delete-orphan")
