@@ -1,12 +1,6 @@
-"""
-QdrantIndexer — handles collection management and chunk upserts.
-
-Falls back to in-memory Qdrant automatically when the configured server
-is unreachable (e.g. no Docker). In-memory mode persists only for the
-lifetime of the process but lets the full pipeline run without Docker.
-"""
 import uuid
 import logging
+import os
 from typing import List, Dict, Any
 
 from qdrant_client import QdrantClient
@@ -17,6 +11,7 @@ from qdrant_client.models import (
     Filter,
     FieldCondition,
     MatchValue,
+    PayloadSchemaType
 )
 from core.config import settings
 
@@ -24,23 +19,20 @@ logger = logging.getLogger(__name__)
 
 COLLECTION_NAME = "documind_chunks"
 
-# Module-level singleton so all workers share the same in-memory store
 _client: QdrantClient | None = None
-
 
 def _get_client() -> QdrantClient:
     global _client
     if _client is not None:
         return _client
 
-    # Try the configured remote Qdrant first
     try:
         remote = QdrantClient(
             url=settings.QDRANT_URL,
             api_key=settings.QDRANT_API_KEY or None,
-            timeout=3,
+            timeout=10,
         )
-        remote.get_collections()          # probe — will throw if unreachable
+        remote.get_collections()
         _client = remote
         logger.info("Connected to Qdrant at %s", settings.QDRANT_URL)
     except Exception as exc:
@@ -55,9 +47,7 @@ def _get_client() -> QdrantClient:
 
     return _client
 
-
 def ensure_collection(dimension: int = 384) -> None:
-    """Creates the Qdrant collection if it does not already exist."""
     client = _get_client()
     existing = {c.name for c in client.get_collections().collections}
     if COLLECTION_NAME not in existing:
@@ -65,20 +55,28 @@ def ensure_collection(dimension: int = 384) -> None:
             collection_name=COLLECTION_NAME,
             vectors_config=VectorParams(size=dimension, distance=Distance.COSINE),
         )
-
+    
+    # Always attempt to create indexes (Qdrant ignores if they already exist)
+    try:
+        client.create_payload_index(
+            collection_name=COLLECTION_NAME,
+            field_name="document_id",
+            field_schema=PayloadSchemaType.INTEGER,
+        )
+        client.create_payload_index(
+            collection_name=COLLECTION_NAME,
+            field_name="chat_id",
+            field_schema=PayloadSchemaType.INTEGER,
+        )
+    except Exception as e:
+        logger.warning(f"Could not create payload index (might already exist): {e}")
 
 class QdrantIndexer:
-    """Upserts document chunks (with their embeddings) into the Qdrant collection."""
-
     def __init__(self, dimension: int = 384):
         self.client = _get_client()
         ensure_collection(dimension)
 
-    def index_chunks(
-        self,
-        chunks: List[Dict[str, Any]],
-        embeddings: List[List[float]],
-    ) -> None:
+    def index_chunks(self, chunks: List[Dict[str, Any]], embeddings: List[List[float]]) -> None:
         assert len(chunks) == len(embeddings), "chunks and embeddings must be the same length"
 
         points = [
@@ -94,36 +92,21 @@ class QdrantIndexer:
             self.client.upsert(collection_name=COLLECTION_NAME, points=points)
 
     def delete_by_document(self, document_id: int) -> None:
-        """Removes all chunks belonging to a given document."""
         self.client.delete(
             collection_name=COLLECTION_NAME,
             points_selector=Filter(
-                must=[
-                    FieldCondition(
-                        key="document_id",
-                        match=MatchValue(value=document_id),
-                    )
-                ]
+                must=[FieldCondition(key="document_id", match=MatchValue(value=document_id))]
             ),
         )
 
     def scroll_chunks_for_chat(self, chat_id: int) -> List[Dict[str, Any]]:
-        """Returns all stored chunks for a chat — used by BM25 keyword retriever."""
         results, _ = self.client.scroll(
             collection_name=COLLECTION_NAME,
             scroll_filter=Filter(
-                must=[
-                    FieldCondition(
-                        key="chat_id",
-                        match=MatchValue(value=chat_id),
-                    )
-                ]
+                must=[FieldCondition(key="chat_id", match=MatchValue(value=chat_id))]
             ),
             with_payload=True,
             with_vectors=False,
             limit=10_000,
         )
-        return [
-            {"text": r.payload.get("text", ""), "metadata": r.payload}
-            for r in results
-        ]
+        return [{"text": r.payload.get("text", ""), "metadata": r.payload} for r in results]
